@@ -1,0 +1,8 @@
+{
+  "extensionName": {
+    "message": "留白标签页"
+  },
+  "extensionDescription": {
+    "message": "极简的新标签页。时间、搜索、天气、链接，每个组件都能自由拖动和缩放。数据只存在本机，默认不联网，无账号，无统计。"
+  }
+}
