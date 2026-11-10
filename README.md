@@ -2,7 +2,7 @@
 
 极简、本地、私密的浏览器新标签页扩展，适用于 Microsoft Edge 和 Chrome。
 
-[English](#english)
+![](宣传图.png)
 
 ## 特点
 
