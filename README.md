@@ -4,6 +4,8 @@
 
 ![](宣传图.png)
 
+[视频教程](https://www.bilibili.com/video/BV1mNWu6PEvJ/?share_source=copy_web&vd_source=891d3d0cfea22ff4b68d6fe8d1bf8acd)
+
 ## 特点
 
 - **自由布局**：时间、日期、搜索、天气、链接、分组，每个组件都可以拖动、缩放、显示或隐藏。带吸附、对齐线、撤销，可保存多套布局。
