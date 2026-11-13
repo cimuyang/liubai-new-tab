@@ -5,7 +5,7 @@
 import { state, save, local, saveLocal, defaultLayout } from './store.js';
 import { h, svg, clamp, on, emit, track } from './dom.js';
 import { menu, closeMenu, control, prompt, toast } from './ui.js';
-import { toneAt } from './wallpaper.js';
+import { scheduleInk } from './wallpaper.js';
 
 const root = document.documentElement;
 const stage = document.getElementById('stage');
@@ -34,11 +34,12 @@ export function register(id, def) {
 
 /** 按锚点定位，并对齐到物理像素：不使用 transform，文字和图标才能保持锐利。 */
 function position(id) {
-  const { el, anchor } = defs[id];
+  const { el, anchor, constrainWidth } = defs[id];
   const block = state.layout[id];
   const r = el.getBoundingClientRect();
   const snap = (v) => `${Math.round(v * devicePixelRatio) / devicePixelRatio}px`;
-  el.style.left = snap(block.x * innerWidth - r.width / 2);
+  const left = block.x * innerWidth - r.width / 2;
+  el.style.left = snap(constrainWidth ? clamp(left, 8, Math.max(8, innerWidth - r.width - 8)) : left);
   el.style.top = snap(block.y * innerHeight - (anchor === 'top' ? 0 : r.height / 2));
 }
 
@@ -47,11 +48,10 @@ function place(id) {
   const block = state.layout[id];
   el.hidden = !block.visible;
   el.style.setProperty('--s', block.scale);
-  el.dataset.tone = toneAt(block.x, block.y);
   position(id);
 }
 
-const placeAll = () => { ids().forEach(place); frame(); };
+const placeAll = () => { ids().forEach(place); frame(); scheduleInk(); };
 const sizer = new ResizeObserver((entries) => {
   for (const entry of entries) position(entry.target.dataset.id);
   frame();
@@ -60,6 +60,7 @@ const syncPixel = () => root.style.setProperty('--dpx', `${1 / devicePixelRatio}
 syncPixel();
 addEventListener('resize', () => { syncPixel(); placeAll(); });
 on('tone', placeAll);
+on('layout', scheduleInk);
 
 // 编辑模式下，组件只能被选中和拖动：拦下点击、右键和键盘焦点，避免误打开链接或触发搜索
 for (const type of ['click', 'auxclick', 'dblclick', 'contextmenu']) {
@@ -73,6 +74,7 @@ export function renderAll() {
     defs[id].render();
     place(id);
   }
+  scheduleInk();
   if (!editing) return;
   if (selected && !state.layout[selected].visible) selected = null;
   inspect();
@@ -87,7 +89,7 @@ function commit() {
     history.length = ++cursor;
     history.push(snap);
   }
-  save();
+  save(true);
   syncToolbar();
   emit('layout');
 }
@@ -96,7 +98,7 @@ function travel(step) {
   if (!history[cursor + step]) return;
   cursor += step;
   state.layout = JSON.parse(history[cursor]);
-  save();
+  save(true);
   renderAll();
   emit('layout');
 }
@@ -233,7 +235,12 @@ function inspect() {
   /** 位置或大小变了：重新摆放。final 为 false 表示滑块拖动中，不计入撤销历史。 */
   const move = (final = true) => { place(selected); frame(); if (final) commit(); else save(); };
   /** 组件自己的选项变了：先重绘内容，再摆放。 */
-  const update = (final) => { def.render(); move(final); };
+  const update = (final) => {
+    def.render();
+    ui.insp.classList.toggle('fixed-position-options', selected === 'links' && block.arrangement === 'fixed');
+    move(final);
+  };
+  ui.insp.classList.toggle('fixed-position-options', selected === 'links' && block.arrangement === 'fixed');
   const scale = { key: 'scale', label: '大小', min: .4, max: 3, step: .01, format: (v) => `${Math.round(v * 100)}%` };
   ui.insp.replaceChildren(
     h('div', { class: 'insp-head' }, h('b', { text: def.title }), h('button', { class: 'link-btn', text: '隐藏', onclick: hideSelected })),
@@ -337,8 +344,10 @@ export function onStagePointerDown(e) {
   const xs = [innerWidth / 2, margin, innerWidth - margin, ...others.flatMap((o) => [o.left, o.left + o.width / 2, o.right])];
   const ys = [innerHeight / 2, margin, innerHeight - margin, ...others.flatMap((o) => [o.top, o.top + o.height / 2, o.bottom])];
   let moved = false;
+  const editor = ui;
 
   track((ev) => {
+    if (ui !== editor) return;
     let dx = ev.clientX - e.clientX;
     let dy = ev.clientY - e.clientY;
     if (!moved && Math.hypot(dx, dy) < 3) return;
@@ -363,6 +372,7 @@ export function onStagePointerDown(e) {
     frame();
     showGuides(guideX, guideY, gaps);
   }, () => {
+    if (ui !== editor) return;
     root.classList.remove('moving');
     showGuides();
     if (!moved) return;
@@ -383,21 +393,24 @@ function startScale(e) {
   const ay = defs[id].anchor === 'top' ? r.top : r.top + r.height / 2;
   const d0 = Math.hypot(e.clientX - ax, e.clientY - ay) || 1;
   const s0 = block.scale;
+  const editor = ui;
 
   track((ev) => {
+    if (ui !== editor) return;
     let s = clamp(s0 * Math.hypot(ev.clientX - ax, ev.clientY - ay) / d0, .4, 3);
     if (!ev.altKey && Math.abs(s - 1) < .04) s = 1; // 吸附到默认大小
     block.scale = Math.round(s * 100) / 100;
     place(id);
     frame();
   }, () => {
+    if (ui !== editor) return;
     inspect();
     commit();
   });
 }
 
 function onKey(e) {
-  if (e.target.closest?.('input, .scrim')) return;
+  if (e.isComposing || e.target.closest?.('input, textarea, select, [contenteditable], .scrim, .menu')) return;
   const mod = e.ctrlKey || e.metaKey;
   const key = e.key.toLowerCase();
   if (mod && (key === 'z' || key === 'y')) { e.preventDefault(); travel(key === 'y' || e.shiftKey ? 1 : -1); return; }

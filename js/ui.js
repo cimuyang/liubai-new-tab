@@ -18,6 +18,7 @@ export function closeMenu() { dismissMenu?.(); }
 export function menu(items, at) {
   closeMenu();
   const el = h('div', { class: 'menu panel', role: 'menu' });
+  const previous = document.activeElement;
   const path = []; // 进入的子菜单层级
 
   const draw = () => {
@@ -46,6 +47,8 @@ export function menu(items, at) {
       h('span', { class: 'menu-label', text: it.label }),
       it.items && svg('chevron')));
     }
+    for (const button of el.querySelectorAll('button')) button.setAttribute('role', 'menuitem');
+    el.querySelector('button')?.focus({ preventScroll: true });
     let { x, y } = at;
     if (at instanceof Element) {
       const r = at.getBoundingClientRect();
@@ -57,7 +60,15 @@ export function menu(items, at) {
   };
 
   const onDown = (e) => { if (!el.contains(e.target)) close(); };
-  const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
+  const onKey = (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); previous?.focus({ preventScroll: true }); return; }
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+    e.preventDefault(); e.stopPropagation();
+    const items = [...el.querySelectorAll('button')];
+    const index = items.indexOf(document.activeElement);
+    const next = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1 : (index + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+    items[next]?.focus();
+  };
   function close() {
     el.remove();
     removeEventListener('pointerdown', onDown, true);
@@ -77,16 +88,25 @@ export function menu(items, at) {
 }
 
 // ───────── 对话框 ─────────
+const dialogs = [];
+let dialogId = 0;
 /**
  * @param opts { title, note, body: Node[], actions: [{ label, primary, danger, onClick(close) }], onClose }
  *   没有 onClick 的按钮仅关闭对话框；按回车触发 primary 按钮。
  */
 export function sheet({ title, note, body = [], actions = [], onClose }) {
   closeMenu();
+  const previous = document.activeElement;
+  let closed = false;
   const close = () => {
+    if (closed) return;
+    closed = true;
     scrim.remove();
+    dialogs.splice(dialogs.indexOf(scrim), 1);
     removeEventListener('keydown', onKey, true);
     onClose?.();
+    if (previous?.isConnected && (!dialogs.length || dialogs.at(-1).contains(previous))) previous.focus({ preventScroll: true });
+    else if (dialogs.length) dialogs.at(-1).querySelector('.sheet').focus({ preventScroll: true });
   };
   const buttons = actions.map((a) => h('button', {
     class: `btn${a.primary ? ' primary' : ''}${a.danger ? ' danger' : ''}`,
@@ -94,21 +114,38 @@ export function sheet({ title, note, body = [], actions = [], onClose }) {
     onclick: () => (a.onClick ? a.onClick(close) : close()),
   }));
   const primary = buttons[actions.findIndex((a) => a.primary)];
-  const box = h('div', { class: 'sheet panel', role: 'dialog' },
-    h('h2', { text: title }),
+  const heading = `sheet-title-${++dialogId}`;
+  const box = h('div', { class: 'sheet panel', role: 'dialog', tabIndex: -1, 'aria-modal': 'true', 'aria-labelledby': heading },
+    h('h2', { id: heading, text: title }),
     note && h('p', { class: 'note', text: note }),
     h('div', { class: 'sheet-body' }, body),
     h('div', { class: 'sheet-actions' }, buttons));
   const scrim = h('div', { class: 'scrim', onpointerdown: (e) => { if (e.target === scrim) close(); } }, box);
 
   function onKey(e) {
-    if (e.isComposing) return;
-    if (e.key === 'Escape') { e.stopPropagation(); close(); }
-    if (e.key === 'Enter' && primary && e.target.tagName !== 'BUTTON') { e.preventDefault(); primary.click(); }
+    if (dialogs.at(-1) !== scrim || e.isComposing) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      close();
+    } else if (e.key === 'Tab') {
+      const items = [...box.querySelectorAll('button, input, select, textarea, summary, [tabindex="0"]')]
+        .filter((item) => !item.disabled && item.getClientRects().length);
+      const first = items[0] || box;
+      const last = items.at(-1) || box;
+      if (!items.includes(document.activeElement) || (e.shiftKey ? document.activeElement === first : document.activeElement === last)) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+      }
+    } else if (e.key === 'Enter' && primary && box.contains(e.target) && e.target.matches('input.input:not([type]), input[type="text"]')) {
+      e.preventDefault();
+      primary.click();
+    }
   }
   addEventListener('keydown', onKey, true);
+  dialogs.push(scrim);
   layer.append(scrim);
-  (box.querySelector('input.input') || primary)?.focus();
+  (box.querySelector('input.input') || primary || buttons[0] || box).focus();
   return { close, primary };
 }
 
@@ -152,11 +189,16 @@ export const field = (label, input) => h('label', { class: 'field' }, h('span', 
 export function control(obj, { key, label, options, min, max, step = 1, format = String }, change) {
   const name = label && h('span', { class: 'row-label', text: label });
   if (options) {
-    const seg = h('div', { class: 'seg' }, options.map(([value, text]) => h('button', {
+    const seg = h('div', { class: 'seg', role: 'group', 'aria-label': label }, options.map(([value, text]) => h('button', {
       class: value === obj[key] ? 'on' : '',
+      'aria-pressed': String(value === obj[key]),
       text,
       onclick: (e) => {
-        for (const b of seg.children) b.classList.toggle('on', b === e.currentTarget);
+        for (const b of seg.children) {
+          const active = b === e.currentTarget;
+          b.classList.toggle('on', active);
+          b.setAttribute('aria-pressed', String(active));
+        }
         obj[key] = value;
         change(true);
       },
@@ -170,7 +212,7 @@ export function control(obj, { key, label, options, min, max, step = 1, format =
     return h('label', { class: 'row' }, name, input);
   }
   const out = h('span', { class: 'row-value', text: format(obj[key]) });
-  const input = h('input', { type: 'range', min, max, step, value: obj[key] });
+  const input = h('input', { type: 'range', 'aria-label': label, min, max, step, value: obj[key] });
   const paint = () => input.style.setProperty('--p', `${((input.value - min) / (max - min)) * 100}%`);
   input.addEventListener('input', () => { obj[key] = +input.value; paint(); out.textContent = format(obj[key]); change(false); });
   input.addEventListener('change', () => change(true));

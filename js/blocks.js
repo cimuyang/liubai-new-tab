@@ -1,8 +1,8 @@
 // 组件：时间、日期、搜索、天气。
 
 import { state, local, saveLocal } from './store.js';
-import { h, svg, hostOf, normalizeUrl, openUrl, emit } from './dom.js';
-import { iconNode } from './icons.js';
+import { h, svg, hostOf, normalizeUrl, openUrl, searchWeb, emit, on } from './dom.js';
+import { iconKey, iconNode, refreshIcons } from './icons.js';
 import { describe, cachedWeather, fetchWeather } from './weather.js';
 
 const pad = (n) => String(n).padStart(2, '0');
@@ -48,7 +48,7 @@ export function createClock() {
     options: () => [
       { key: 'hour24', label: '24 小时制' },
       { key: 'seconds', label: '显示秒' },
-      { key: 'weight', label: '字重', options: [[200, '纤细'], [300, '细'], [500, '中'], [700, '粗']] },
+      { key: 'weight', label: '字重', options: [[200, '轻盈'], [400, '常规'], [600, '醒目']] },
     ],
   };
 }
@@ -116,10 +116,11 @@ export function createSearch() {
       ...hits.map(({ link }) => ({ link, label: link.name || hostOf(link.url), hint: hostOf(link.url), run: () => openUrl(link.url) })),
       url
         ? { label: text, hint: '打开网址', icon: 'globe', run: () => openUrl(url) }
-        : { label: text, hint: '搜索', icon: 'search', run: () => chrome.search.query({ text, disposition: 'CURRENT_TAB' }) }, // 浏览器的默认搜索引擎
+        : { label: text, hint: '搜索', icon: 'search', run: () => searchWeb(text) },
     ];
     active = hits[0]?.prefix ? 0 : rows.length - 1; // 输入与某个链接的开头吻合时默认选中它，否则默认搜索
     draw();
+    refreshIcons(hits.map(({ link }) => link));
   }
 
   function draw() {
@@ -137,6 +138,9 @@ export function createSearch() {
   input.addEventListener('input', suggest);
   input.addEventListener('focus', suggest);
   input.addEventListener('blur', () => { list.hidden = true; });
+  on('icon', (key) => {
+    if (!list.hidden && rows.some((row) => row.link && !row.link.icon && iconKey(row.link.url) === key)) draw();
+  });
   input.addEventListener('keydown', (e) => {
     if (e.isComposing) return; // 输入法选字时的回车不触发搜索
     if (e.key === 'Escape') { input.value = ''; input.blur(); return; }
@@ -184,7 +188,9 @@ export function createWeather() {
     if (cached) show(cached); else message(city.name);
     fetchWeather(city)
       .then((data) => { if (state.layout.weather.visible && state.layout.weather.city === city && data !== cached) show(data); })
-      .catch(() => { if (!cached) message(`${city.name} · 暂时无法获取天气`); });
+      .catch(() => {
+        if (!cached && state.layout.weather.visible && state.layout.weather.city === city) message(`${city.name} · 暂时无法获取天气`);
+      });
   }
 
   el.addEventListener('click', (e) => {

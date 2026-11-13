@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "__MSG_extensionName__",
   "short_name": "留白",
-  "version": "1.2.1",
+  "version": "1.6.0",
   "description": "__MSG_extensionDescription__",
   "default_locale": "zh_CN",
   "icons": {
@@ -16,8 +16,8 @@
   },
   "permissions": ["storage", "favicon", "search"],
   "optional_permissions": ["bookmarks"],
-  "optional_host_permissions": ["https://www.bing.com/*"],
+  "optional_host_permissions": ["https://*/*"],
   "content_security_policy": {
-    "extension_pages": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self' https://api.open-meteo.com https://www.bing.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    "extension_pages": "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self' https:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
   }
 }

@@ -2,6 +2,20 @@
 
 export const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
 export const today = () => new Date().toLocaleDateString('sv'); // YYYY-MM-DD
+const segmenter = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter() : null;
+
+export function shortText(value, max = 4) {
+  const clean = typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, '').trim() : '';
+  let text = '';
+  let count = 0;
+  for (const part of segmenter?.segment(clean) ?? clean) {
+    if (count++ === max) break;
+    text += part.segment ?? part;
+  }
+  return text;
+}
+
+export const initials = (name, url) => shortText(name, 1).toUpperCase() || shortText(hostOf(url), 1).toUpperCase() || '?';
 
 /** 创建元素。props 支持 class / text / on<event> 以及任意属性。 */
 export function h(tag, props, ...kids) {
@@ -48,7 +62,11 @@ export function svg(name) {
 
 // 模块间通信，避免循环依赖
 const bus = new EventTarget();
-export const on = (name, fn) => bus.addEventListener(name, (e) => fn(e.detail));
+export function on(name, fn) {
+  const listener = (e) => fn(e.detail);
+  bus.addEventListener(name, listener);
+  return () => bus.removeEventListener(name, listener);
+}
 export const emit = (name, detail) => bus.dispatchEvent(new CustomEvent(name, { detail }));
 
 /** 跟踪一次按下之后的指针移动，直到松开。 */
@@ -87,9 +105,31 @@ export function normalizeUrl(input) {
 }
 
 /** 在当前标签页打开网址。edge:// 等内部页面不能用普通跳转打开，需交给浏览器。 */
-export function openUrl(url) {
-  if (/^https?:/.test(url)) location.href = url;
-  else chrome.tabs.update({ url });
+const isEdge = /\bEdg\//.test(navigator.userAgent);
+const internalPages = new Set(['downloads', 'extensions', 'history', 'settings', 'version', 'flags', 'newtab', 'bookmarks', 'favorites']);
+
+export async function openUrl(url, newTab = false) {
+  try {
+    const page = new URL(url);
+    if (['chrome:', 'edge:'].includes(page.protocol) && internalPages.has(page.hostname)) {
+      const host = page.hostname === 'bookmarks' || page.hostname === 'favorites'
+        ? (isEdge ? 'favorites' : 'bookmarks') : page.hostname;
+      url = `${isEdge ? 'edge' : 'chrome'}://${host}${page.pathname}${page.search}${page.hash}`;
+    }
+    if (newTab) await chrome.tabs.create({ url });
+    else if (/^https?:/.test(url)) location.href = url;
+    else await chrome.tabs.update({ url });
+  } catch {
+    emit('notice', url.startsWith('file:') ? '无法打开本地文件，请检查扩展的文件访问权限' : '浏览器无法打开这个地址');
+  }
+}
+
+export async function searchWeb(text) {
+  try {
+    await chrome.search.query({ text, disposition: 'CURRENT_TAB' });
+  } catch {
+    emit('notice', '无法调用浏览器搜索，请在地址栏搜索');
+  }
 }
 
 /** 弹出系统文件选择框。 */
@@ -100,14 +140,4 @@ export function pickFile(accept) {
     input.addEventListener('cancel', () => resolve(null));
     input.click();
   });
-}
-
-/** 把图片按 cover 方式绘制到指定尺寸的画布。 */
-export function cover(img, width, height) {
-  const canvas = h('canvas', { width, height });
-  const scale = Math.max(width / img.width, height / img.height);
-  const w = img.width * scale;
-  const hgt = img.height * scale;
-  canvas.getContext('2d', { willReadFrequently: true }).drawImage(img, (width - w) / 2, (height - hgt) / 2, w, hgt);
-  return canvas;
 }

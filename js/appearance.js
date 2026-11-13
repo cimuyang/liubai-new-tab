@@ -3,37 +3,38 @@
 import { state, save, local, saveLocal } from './store.js';
 import { h, pickFile, today } from './dom.js';
 import { sheet, control, toast } from './ui.js';
-import { PRESETS, GRID_W, GRID_H, usesImage, file, applyAppearance } from './wallpaper.js';
+import { PRESETS, imageGrid, usesImage, file, applyAppearance } from './wallpaper.js';
 
 /** 设为壁纸：保存图片，并生成首帧占位图与亮度网格。图片只保存在本机。 */
 export async function setImage(blob, credit = '') {
   const img = await createImageBitmap(blob);
-  const draw = (width, height) => {
-    const canvas = new OffscreenCanvas(Math.round(width), Math.round(height));
-    const ctx = canvas.getContext('2d');
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    return canvas;
-  };
-  // 按屏幕的实际像素保存：再大也显示不出更多细节，却会让每个打开的标签页多占几十 MB 内存
-  const scale = Math.max(screen.width / img.width, screen.height / img.height) * devicePixelRatio;
-  if (scale < 1) blob = await draw(img.width * scale, img.height * scale).convertToBlob({ type: 'image/jpeg', quality: .9 });
-  await file('readwrite', (s) => s.put(blob, 'wallpaper'));
-
-  const px = draw(GRID_W, GRID_H).getContext('2d').getImageData(0, 0, GRID_W, GRID_H).data;
-  let grid = '';
-  for (let i = 0; i < px.length; i += 4) grid += Math.round((.2126 * px[i] + .7152 * px[i + 1] + .0722 * px[i + 2]) / 255 * 9);
-  const small = await draw(64, 64 * img.height / img.width).convertToBlob({ type: 'image/jpeg', quality: .6 });
-  const preview = await new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.readAsDataURL(small);
-  });
-  local.image = { preview, grid, ratio: img.width / img.height, credit };
-  state.appearance.wallpaper = 'image';
-  saveLocal('image');
-  save();
-  applyAppearance(true);
+  try {
+    const draw = (width, height) => {
+      const canvas = new OffscreenCanvas(Math.max(1, Math.round(width)), Math.max(1, Math.round(height)));
+      const ctx = canvas.getContext('2d');
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      return canvas;
+    };
+    const scale = Math.max(screen.width / img.width, screen.height / img.height) * devicePixelRatio;
+    if (scale < 1) blob = await draw(img.width * scale, img.height * scale).convertToBlob({ type: 'image/jpeg', quality: .9 });
+    const small = await draw(64, Math.min(96, 64 * img.height / img.width)).convertToBlob({ type: 'image/jpeg', quality: .6 });
+    const preview = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(small);
+    });
+    const meta = { preview, rgb: imageGrid(img), ratio: img.width / img.height, credit };
+    await file('readwrite', (s) => s.put(blob, 'wallpaper'));
+    local.image = meta;
+    state.appearance.wallpaper = 'image';
+    saveLocal('image');
+    save();
+    applyAppearance(true);
+  } finally {
+    img.close();
+  }
 }
 
 // ───────── 必应壁纸 ─────────
@@ -89,6 +90,8 @@ const BING_NOTES = {
 export function openAppearance() {
   const a = state.appearance;
   const box = h('div', { class: 'stack' });
+  let closed = false;
+  const thumbnails = new Set();
   let gallery = null; // null 未载入 | 'loading' | 'error' | 壁纸数组
   const percent = (v) => `${Math.round(v * 100)}%`;
 
@@ -111,11 +114,15 @@ export function openAppearance() {
     try {
       if (!await chrome.permissions.request(BING_ACCESS)) throw new Error('未授权');
       const items = await bingList();
-      await Promise.all(items.map(async (item) => {
-        item.thumb = URL.createObjectURL(await (await bingFetch(`${item.base}_320x180.jpg`)).blob());
+      await Promise.allSettled(items.map(async (item) => {
+        const blob = await (await bingFetch(`${item.base}_320x180.jpg`)).blob();
+        if (closed) return;
+        item.thumb = URL.createObjectURL(blob);
+        thumbnails.add(item.thumb);
       }));
-      gallery = items;
-    } catch { gallery = 'error'; }
+      gallery = items.filter(item => item.thumb);
+      if (!gallery.length) gallery = 'error';
+    } catch { gallery = 'error'; for (const url of thumbnails) URL.revokeObjectURL(url); thumbnails.clear(); }
     draw();
   }
 
@@ -136,10 +143,15 @@ export function openAppearance() {
   }
 
   function draw() {
+    if (closed) return;
     const image = usesImage();
     const swatch = (label, on, props, onclick) => h('button', { class: `swatch${on ? ' on' : ''}`, title: label, onclick, ...props });
     box.replaceChildren(...[
       control(a, { key: 'theme', label: '主题', options: [['auto', '跟随系统'], ['light', '浅色'], ['dark', '深色']] }, apply),
+      control(a, { key: 'ink', label: '页面字色', options: [['auto', '自动'], ['light', '浅色'], ['dark', '深色'], ['custom', '自定义']] }, apply),
+      a.ink === 'custom' && h('label', { class: 'row icon-color' }, h('span', { class: 'row-label', text: '自定义字色' }),
+        h('input', { type: 'color', value: a.inkColor, oninput: (e) => { a.inkColor = e.target.value; apply(false); } })),
+      control(a, { key: 'inkShadow', label: '文字阴影' }, apply),
       h('div', { class: 'swatches' },
         PRESETS.map(([id, name]) => swatch(name, !image && document.documentElement.dataset.wall === id, { 'data-wall': id }, () => choose(id))),
         local.image && swatch(local.image.credit ? '必应壁纸' : '我的图片', image, { style: `background-image: url("${local.image.preview}")` }, () => choose('image')),
@@ -164,6 +176,6 @@ export function openAppearance() {
     title: '外观',
     body: [box],
     actions: [{ label: '完成', primary: true }],
-    onClose: () => { if (Array.isArray(gallery)) for (const item of gallery) URL.revokeObjectURL(item.thumb); },
+    onClose: () => { closed = true; for (const url of thumbnails) URL.revokeObjectURL(url); thumbnails.clear(); },
   });
 }
