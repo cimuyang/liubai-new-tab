@@ -190,12 +190,12 @@ export function applyAppearance(reload = false) {
 
 async function upgradeGrid() {
   const saved = local.image;
-  if (state.appearance.wallpaper !== 'image' || saved?.rgb) return;
+  if (state.appearance.wallpaper !== 'image' || saved?.rgb && saved?.previewVersion === 1) return;
   const blob = await getBlob();
   if (!blob || local.image !== saved || state.appearance.wallpaper !== 'image') return;
-  if (!saved?.preview) {
+  if (!saved?.preview || saved.previewVersion !== 1) {
     const { setImage } = await import('./appearance.js');
-    if (local.image === saved && state.appearance.wallpaper === 'image') await setImage(blob);
+    if (local.image === saved && state.appearance.wallpaper === 'image') await setImage(blob, saved?.credit || '', () => local.image === saved && state.appearance.wallpaper === 'image');
     return;
   }
   const img = await createImageBitmap(blob);

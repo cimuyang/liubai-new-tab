@@ -92,13 +92,13 @@ button { border: 0; background: none; padding: 0; cursor: default; }
   position: absolute; inset: calc(var(--blur) * -2); /* 模糊时向外扩展，避免边缘发虚 */
   background: center / cover no-repeat;
   filter: blur(var(--blur));
-  opacity: 0; transition: opacity .5s ease;
+  opacity: 0;
 }
 #wall-img.on { opacity: 1; }
 #wall::after { content: ""; position: absolute; inset: 0; background: #000; opacity: var(--dim); pointer-events: none; }
 
 /* ───────── 舞台与组件 ───────── */
-#stage { position: fixed; inset: 0; animation: appear .45s var(--ease) both; }
+#stage { position: fixed; inset: 0;  }
 @keyframes appear { from { opacity: 0; } }
 
 /* 位置由脚本按物理像素对齐后写入 left / top */
@@ -133,10 +133,10 @@ button { border: 0; background: none; padding: 0; cursor: default; }
 }
 
 /* 搜索 */
-.search { width: calc(var(--w) * 1em); z-index: 3; text-shadow: none; }
+.search { max-width: calc(100vw - 32px); width: calc(var(--w) * 1em); z-index: 3; text-shadow: none; }
 .search-box {
   display: flex; align-items: center; gap: .7em;
-  height: 2.9em; padding: 0 1.15em;
+  height: var(--search-height, 2.9em); padding: 0 1.15em;
   border-radius: 1.45em;
   background: var(--glass);
   border: 1px solid var(--hair);
@@ -554,3 +554,13 @@ html.editing .toast { top: 70px; }
 
 .fixed-position-options .auto-align { display: none; }
 .link-appearance { display: grid; gap: 12px; }
+
+.suggest { overflow-y: auto; overscroll-behavior: contain; }
+.suggest.above { top: auto; bottom: calc(100% + .55em); transform-origin: bottom center; }
+
+.sel:not([data-kind="search"]) i:nth-child(n+5) { display: none; }
+.sel i:nth-child(5) { left: -7px; top: calc(50% - 6px); cursor: ew-resize; }
+.sel i:nth-child(6) { right: -7px; top: calc(50% - 6px); cursor: ew-resize; }
+.sel i:nth-child(7) { top: -7px; left: calc(50% - 6px); cursor: ns-resize; }
+.sel i:nth-child(8) { bottom: -7px; left: calc(50% - 6px); cursor: ns-resize; }
+.sg-hint { max-width: 48%; overflow: hidden; text-overflow: ellipsis; }

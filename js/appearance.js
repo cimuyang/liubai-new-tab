@@ -6,7 +6,7 @@ import { sheet, control, toast } from './ui.js';
 import { PRESETS, imageGrid, usesImage, file, applyAppearance } from './wallpaper.js';
 
 /** 设为壁纸：保存图片，并生成首帧占位图与亮度网格。图片只保存在本机。 */
-export async function setImage(blob, credit = '') {
+export async function setImage(blob, credit = '', valid = () => true) {
   const img = await createImageBitmap(blob);
   try {
     const draw = (width, height) => {
@@ -18,15 +18,17 @@ export async function setImage(blob, credit = '') {
     };
     const scale = Math.max(screen.width / img.width, screen.height / img.height) * devicePixelRatio;
     if (scale < 1) blob = await draw(img.width * scale, img.height * scale).convertToBlob({ type: 'image/jpeg', quality: .9 });
-    const small = await draw(64, Math.min(96, 64 * img.height / img.width)).convertToBlob({ type: 'image/jpeg', quality: .6 });
+    const small = await draw(640, Math.min(960, 640 * img.height / img.width)).convertToBlob({ type: 'image/jpeg', quality: .6 });
     const preview = await new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result);
       reader.onerror = () => reject(reader.error);
       reader.readAsDataURL(small);
     });
-    const meta = { preview, rgb: imageGrid(img), ratio: img.width / img.height, credit };
-    await file('readwrite', (s) => s.put(blob, 'wallpaper'));
+    if (!valid()) return;
+    const meta = { previewVersion: 1, preview, rgb: imageGrid(img), ratio: img.width / img.height, credit };
+    await file('readwrite', (s) => { if (valid()) s.put(blob, 'wallpaper'); });
+    if (!valid()) return;
     local.image = meta;
     state.appearance.wallpaper = 'image';
     saveLocal('image');
@@ -61,19 +63,27 @@ async function bingList(pages = [0, 7], count = 8) {
 }
 
 async function useBing(item) {
+  const revision = ++selectionRevision;
+  const image = local.image, kind = state.appearance.wallpaper, mode = state.appearance.bing;
+  const valid = () => revision === selectionRevision && local.image === image && state.appearance.wallpaper === kind && state.appearance.bing === mode;
   const size = screen.width * devicePixelRatio > 1920 ? 'UHD' : '1920x1080';
-  await setImage(await (await bingFetch(`${item.base}_${size}.jpg`)).blob(), item.credit);
+  const blob = await (await bingFetch(`${item.base}_${size}.jpg`)).blob();
+  if (!valid()) return;
+  await setImage(blob, item.credit, valid);
 }
 
 /** 「每日自动」：每天最多联网一次；失败后一小时内不重试。 */
 export async function dailyBing(force = false) {
   if (state.appearance.bing !== 'daily') return;
   if (!force && (local.bingDay === today() || Date.now() - local.bingTry < 36e5)) return;
+  const revision = selectionRevision;
   if (!await chrome.permissions.contains(BING_ACCESS)) { state.appearance.bing = 'off'; save(); return; } // 例如从备份恢复到新设备
   local.bingTry = Date.now();
   saveLocal('bingTry');
   try {
-    await useBing((await bingList([0], 1))[0]);
+    const item = (await bingList([0], 1))[0];
+    if (revision !== selectionRevision || state.appearance.bing !== 'daily') return;
+    await useBing(item);
     local.bingDay = today();
     local.bingTry = 0;
     saveLocal('bingDay', 'bingTry');
@@ -87,6 +97,8 @@ const BING_NOTES = {
   daily: '每天第一次打开时连接必应一次，换成当天的壁纸。连接不带账号信息，图片保存在本机。',
 };
 
+let selectionRevision = 0;
+
 export function openAppearance() {
   const a = state.appearance;
   const box = h('div', { class: 'stack' });
@@ -96,7 +108,7 @@ export function openAppearance() {
   const percent = (v) => `${Math.round(v * 100)}%`;
 
   /** 选了具体的壁纸，就不再让「每日自动」覆盖它。 */
-  const pin = () => { if (a.bing === 'daily') a.bing = 'manual'; };
+  const pin = () => { selectionRevision++; if (a.bing === 'daily') a.bing = 'manual'; };
   const apply = (final) => { applyAppearance(); save(); if (final) draw(); };
   const choose = (id) => { if (a.wallpaper === id) return; a.wallpaper = id; pin(); apply(true); };
 
@@ -158,7 +170,7 @@ export function openAppearance() {
         swatch('选择图片', false, { text: '＋' }, async () => {
           const picked = await pickFile('image/*');
           if (!picked) return;
-          try { await setImage(picked); pin(); save(); } catch { toast('无法读取这张图片'); }
+          try { pin(); const revision = selectionRevision; await setImage(picked, '', () => revision === selectionRevision); save(); } catch { toast('无法读取这张图片'); }
           draw();
         })),
       image && control(a, { key: 'dim', label: '暗化', min: 0, max: .7, step: .01, format: percent }, apply),

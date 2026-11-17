@@ -1,3 +1,4 @@
+import { loadSearchSettings, openSearchSettings } from './search-settings.js';
 // 入口：组装各组件，绑定全局交互。
 // 外观面板、导入导出、城市表等不常用的部分，用到时才加载。
 
@@ -14,6 +15,7 @@ const { loadFailed } = await load();
 initAppearance();
 
 const stage = document.getElementById('stage');
+await loadSearchSettings();
 const search = createSearch();
 const links = createLinks();
 await primeIcons(state.groups[local.active]?.links || []).catch(() => {});
@@ -60,6 +62,7 @@ document.addEventListener('contextmenu', (e) => {
     '-',
     { label: '编辑布局', onClick: () => enterEdit(e.target.closest('.block')?.dataset.id) },
     { label: '外观', onClick: openAppearance },
+    { label: '搜索设置', onClick: openSearchSettings },
     { label: '导入与导出', onClick: openData },
   ], { x: e.clientX, y: e.clientY });
 });

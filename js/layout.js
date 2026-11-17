@@ -156,7 +156,7 @@ function buildChrome() {
   const button = (text, onclick, cls) => h('button', { class: cls, text, onclick });
   const undo = h('button', { class: 'icon', title: '撤销', onclick: () => travel(-1) }, svg('undo'));
   const redo = h('button', { class: 'icon', title: '重做', onclick: () => travel(1) }, svg('redo'));
-  const sel = h('div', { class: 'sel', hidden: true }, h('i'), h('i'), h('i'), h('i'));
+  const sel = h('div', { class: 'sel', hidden: true }, ...Array.from({ length: 8 }, () => h('i')));
   for (const handle of sel.children) handle.addEventListener('pointerdown', startScale);
   const insp = h('div', { class: 'insp panel', hidden: true });
   // 调节滑块时收起选中框的圆点，画面更安静
@@ -241,7 +241,7 @@ function inspect() {
     move(final);
   };
   ui.insp.classList.toggle('fixed-position-options', selected === 'links' && block.arrangement === 'fixed');
-  const scale = { key: 'scale', label: '大小', min: .4, max: 3, step: .01, format: (v) => `${Math.round(v * 100)}%` };
+  const scale = { key: 'scale', label: '整体缩放', min: .4, max: 3, step: .01, format: (v) => `${Math.round(v * 100)}%` };
   ui.insp.replaceChildren(
     h('div', { class: 'insp-head' }, h('b', { text: def.title }), h('button', { class: 'link-btn', text: '隐藏', onclick: hideSelected })),
     ...def.options(block, update).map((item) => (item instanceof Node ? item : control(block, item, update))),
@@ -261,6 +261,7 @@ function frame() {
   if (!ui) return;
   ui.sel.hidden = !selected;
   if (!selected) return;
+  ui.sel.dataset.kind = selected;
   const r = rectOf(selected);
   const pad = 10;
   Object.assign(ui.sel.style, {
@@ -393,10 +394,18 @@ function startScale(e) {
   const ay = defs[id].anchor === 'top' ? r.top : r.top + r.height / 2;
   const d0 = Math.hypot(e.clientX - ax, e.clientY - ay) || 1;
   const s0 = block.scale;
+  const handle = [...ui.sel.children].indexOf(e.target);
+  const width = block.width, height = block.height;
+  const unit = parseFloat(getComputedStyle(defs[id].el).fontSize);
   const editor = ui;
 
   track((ev) => {
     if (ui !== editor) return;
+    if (id === 'search' && handle >= 4) {
+      if (handle < 6) block.width = Math.round(clamp(width + (ev.clientX - e.clientX) * (handle === 4 ? -2 : 2) / unit, 16, 60) * 10) / 10;
+      else block.height = Math.round(clamp(height + (ev.clientY - e.clientY) * (handle === 6 ? -2 : 2) / unit, 2.2, 4.5) * 10) / 10;
+      defs[id].render(); place(id); frame(); return;
+    }
     let s = clamp(s0 * Math.hypot(ev.clientX - ax, ev.clientY - ay) / d0, .4, 3);
     if (!ev.altKey && Math.abs(s - 1) < .04) s = 1; // 吸附到默认大小
     block.scale = Math.round(s * 100) / 100;

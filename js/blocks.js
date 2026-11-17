@@ -1,3 +1,4 @@
+import { recentSearches, deleteSearch, runSearch, openSearchSettings } from './search-settings.js';
 // 组件：时间、日期、搜索、天气。
 
 import { state, local, saveLocal } from './store.js';
@@ -101,43 +102,61 @@ function matchLinks(query) {
 
 export function createSearch() {
   const input = h('input', { type: 'text', placeholder: '搜索', spellcheck: false, autocomplete: 'off', 'aria-label': '搜索' });
-  const list = h('div', { class: 'suggest', hidden: true });
+  const list = h('div', { class: 'suggest', hidden: true, id: 'search-options', role: 'listbox' });
+  input.setAttribute('role', 'combobox'); input.setAttribute('aria-controls', 'search-options'); input.setAttribute('aria-autocomplete', 'list'); input.setAttribute('aria-expanded', 'false');
   const el = h('div', { class: 'search' }, h('label', { class: 'search-box' }, svg('search'), input), list);
   let rows = [];
   let active = 0;
 
   function suggest() {
     const text = input.value.trim();
-    list.hidden = !text;
-    if (!text) { rows = []; return; }
-    const hits = matchLinks(text);
+    const recent = recentSearches(text);
+    list.hidden = !text && !recent.length;
+    if (list.hidden) { rows = []; return; }
+    const hits = text ? matchLinks(text) : [];
     const url = looksLikeUrl(text) && normalizeUrl(text);
     rows = [
       ...hits.map(({ link }) => ({ link, label: link.name || hostOf(link.url), hint: hostOf(link.url), run: () => openUrl(link.url) })),
-      url
+      ...(text ? [url
         ? { label: text, hint: '打开网址', icon: 'globe', run: () => openUrl(url) }
-        : { label: text, hint: '搜索', icon: 'search', run: () => searchWeb(text) },
+        : { label: text, hint: '搜索', icon: 'search', run: () => runSearch(text) }] : []),
+      ...recent.map(term => ({ term, label: term, hint: '最近搜索 · Shift+Delete 删除', icon: 'search', run: () => runSearch(term) })),
     ];
-    active = hits[0]?.prefix ? 0 : rows.length - 1; // 输入与某个链接的开头吻合时默认选中它，否则默认搜索
+    active = hits[0]?.prefix ? 0 : hits.length; // 输入与某个链接的开头吻合时默认选中它，否则默认搜索
     draw();
     refreshIcons(hits.map(({ link }) => link));
   }
 
+  function highlight() {
+    [...list.children].forEach((node, i) => { node.classList.toggle('on', i === active); node.setAttribute('aria-selected', String(i === active)); });
+    input.setAttribute('aria-activedescendant', 'search-option-' + active);
+  }
+  function fitList() {
+    const r = el.getBoundingClientRect();
+    const below = innerHeight - r.bottom - 16;
+    const up = below < Math.min(list.scrollHeight, 300) && r.top > below;
+    list.classList.toggle('above', up);
+    list.style.maxHeight = Math.max(40, (up ? r.top - 16 : below)) + 'px';
+  }
+  addEventListener('resize', fitList);
   function draw() {
     list.replaceChildren(...rows.map((row, i) => h('button', {
-      class: `sg${i === active ? ' on' : ''}`,
+      class: `sg${i === active ? ' on' : ''}`, id: 'search-option-' + i, role: 'option',
       onpointerdown: (e) => e.preventDefault(), // 不让输入框失焦
       onclick: row.run,
-      onpointermove: () => { if (active !== i) { active = i; draw(); } },
+      onpointermove: () => { if (active !== i) { active = i; highlight(); } },
     },
     row.link ? iconNode(row.link, 'sg-icon') : h('span', { class: 'sg-icon' }, svg(row.icon)),
     h('span', { class: 'sg-name', text: row.label }),
     h('span', { class: 'sg-hint', text: row.hint }))));
+    highlight(); fitList();
+    input.setAttribute('aria-expanded', String(!list.hidden));
   }
 
+  on('search-settings', () => { if (document.activeElement === input) suggest(); else { rows = []; list.hidden = true; input.setAttribute('aria-expanded', 'false'); } });
   input.addEventListener('input', suggest);
   input.addEventListener('focus', suggest);
-  input.addEventListener('blur', () => { list.hidden = true; });
+  input.addEventListener('blur', () => { list.hidden = true; input.setAttribute('aria-expanded', 'false'); });
   on('icon', (key) => {
     if (!list.hidden && rows.some((row) => row.link && !row.link.icon && iconKey(row.link.url) === key)) draw();
   });
@@ -145,10 +164,13 @@ export function createSearch() {
     if (e.isComposing) return; // 输入法选字时的回车不触发搜索
     if (e.key === 'Escape') { input.value = ''; input.blur(); return; }
     if (!rows.length) return;
+    if (e.key === 'Delete' && e.shiftKey && rows[active]?.term) {
+      e.preventDefault(); deleteSearch(rows[active].term).then(suggest).catch(() => emit('notice', '删除失败，请重试')); return;
+    }
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
       active = (active + (e.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length;
-      draw();
+      highlight();
     } else if (e.key === 'Enter') {
       e.preventDefault();
       rows[active].run();
@@ -156,11 +178,13 @@ export function createSearch() {
   });
 
   return {
-    el, title: '搜索', input,
-    render() { el.style.setProperty('--w', state.layout.search.width); },
+    el, title: '搜索', input, constrainWidth: true,
+    render() { el.style.setProperty('--w', state.layout.search.width); el.style.setProperty('--search-height', state.layout.search.height + 'em'); },
     options: () => [
       { key: 'width', label: '宽度', min: 16, max: 60 },
-      note('使用浏览器的默认搜索引擎。输入时先匹配你的链接，回车直达。'),
+      { key: 'height', label: '高度', min: 2.2, max: 4.5, step: .1 },
+      h('button', { class: 'btn', text: '搜索引擎与历史', onclick: openSearchSettings }),
+      note('拖左右边调整宽度，上下边调整高度；四角整体缩放。'),
     ],
   };
 }

@@ -48,7 +48,7 @@ export async function fetchWeather(city) {
   if (Date.now() - failedAt < RETRY) throw new Error('天气服务暂时不可用');
   const promise = request(city)
     .catch((err) => { failedAt = Date.now(); throw err; })
-    .finally(() => { pending = null; });
+    .finally(() => { if (pending?.promise === promise) pending = null; });
   pending = { key: keyOf(city), promise };
   return promise;
 }
@@ -73,6 +73,7 @@ async function request(city) {
     high: json.daily.temperature_2m_max[0],
     low: json.daily.temperature_2m_min[0],
   };
+  if (pending?.key !== keyOf(city)) return data;
   local.weather = { key: keyOf(city), t: Date.now(), data };
   saveLocal('weather');
   return data;
