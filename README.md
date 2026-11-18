@@ -108,18 +108,3 @@ Required permissions are `storage` (save your data), `favicon` (read the browser
 ## Credits
 
 Weather data by [Open-Meteo](https://open-meteo.com/).
-
-## 1.6.0 本地更新 / Local update
-
-新布局默认居中并使用主色填充。时间使用本地 Inter 字体，提供轻盈、常规、醒目三档；旧字重映射到最近的预设。链接样式折叠展示，修复同等清晰度图标无法刷新的问题，减少分组重绘，并补充菜单键盘导航。已有链接对齐和底色设置保留。
-
-New layouts default to centered links and solid icon fills. A bundled Inter variable font provides three distinct clock weights. Link appearance controls are grouped, explicit icon refresh accepts equally sharp replacements, and menus support keyboard navigation. Existing link preferences are preserved.
-
-Inter is distributed under the SIL Open Font License; see `liubai/fonts/LICENSE.txt`.
-
-
-## 1.7.0 搜索与壁纸体验更新
-
-右键 → 搜索设置，可选择浏览器默认、谷歌、必应、百度或自定义 HTTPS 搜索地址（使用 `{query}` 占位）。搜索历史默认关闭，必须主动开启；仅保存在本机，最多 30 条，不进入备份，无痕窗口不记录。关闭并保存会清空记录，也可随时清空；选中历史项后按 Shift+Delete 删除单条。
-
-编辑布局 → 搜索，可独立调整宽度和高度；左右边缘拖动调整宽度，上下边缘调整高度，四角保持整体缩放。搜索建议自动避让窗口底部并支持滚动。壁纸首次显示取消淡入，旧低清预览自动更新为较清晰的本地预览。
