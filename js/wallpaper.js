@@ -16,7 +16,7 @@ export const usesImage = () => state.appearance.wallpaper === 'image' && !!local
 export async function file(mode, run) {
   return (await transaction('liubai', 'files', mode, run)).result;
 }
-const getBlob = () => file('readonly', (store) => store.get('wallpaper')).catch(() => null);
+const getBlob = () => file('readonly', (store) => store.get(local.image?.key || 'wallpaper')).catch(() => null);
 
 let imageUrl;
 let imageLoad;
@@ -190,10 +190,10 @@ export function applyAppearance(reload = false) {
 
 async function upgradeGrid() {
   const saved = local.image;
-  if (state.appearance.wallpaper !== 'image' || saved?.rgb && saved?.previewVersion === 1) return;
+  if (state.appearance.wallpaper !== 'image' || saved?.rgb && saved?.previewVersion === 2) return;
   const blob = await getBlob();
   if (!blob || local.image !== saved || state.appearance.wallpaper !== 'image') return;
-  if (!saved?.preview || saved.previewVersion !== 1) {
+  if (!saved?.preview || saved.previewVersion !== 2) {
     const { setImage } = await import('./appearance.js');
     if (local.image === saved && state.appearance.wallpaper === 'image') await setImage(blob, saved?.credit || '', () => local.image === saved && state.appearance.wallpaper === 'image');
     return;

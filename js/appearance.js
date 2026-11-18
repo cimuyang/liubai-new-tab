@@ -7,7 +7,7 @@ import { PRESETS, imageGrid, usesImage, file, applyAppearance } from './wallpape
 
 /** 设为壁纸：保存图片，并生成首帧占位图与亮度网格。图片只保存在本机。 */
 export async function setImage(blob, credit = '', valid = () => true) {
-  const img = await createImageBitmap(blob);
+  const img = await createImageBitmap(blob).catch(() => { throw new Error('无法解码这张图片，请选择其他图片'); });
   try {
     const draw = (width, height) => {
       const canvas = new OffscreenCanvas(Math.max(1, Math.round(width)), Math.max(1, Math.round(height)));
@@ -18,22 +18,33 @@ export async function setImage(blob, credit = '', valid = () => true) {
     };
     const scale = Math.max(screen.width / img.width, screen.height / img.height) * devicePixelRatio;
     if (scale < 1) blob = await draw(img.width * scale, img.height * scale).convertToBlob({ type: 'image/jpeg', quality: .9 });
-    const small = await draw(640, Math.min(960, 640 * img.height / img.width)).convertToBlob({ type: 'image/jpeg', quality: .6 });
+    const previewScale = Math.min(1, 640 / img.width, 960 / img.height);
+    const small = await draw(img.width * previewScale, img.height * previewScale).convertToBlob({ type: 'image/jpeg', quality: .6 });
     const preview = await new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result);
       reader.onerror = () => reject(reader.error);
       reader.readAsDataURL(small);
     });
-    if (!valid()) return;
-    const meta = { previewVersion: 1, preview, rgb: imageGrid(img), ratio: img.width / img.height, credit };
-    await file('readwrite', (s) => { if (valid()) s.put(blob, 'wallpaper'); });
-    if (!valid()) return;
-    local.image = meta;
-    state.appearance.wallpaper = 'image';
-    saveLocal('image');
-    save();
-    applyAppearance(true);
+    const key = 'wallpaper-' + crypto.randomUUID();
+    const meta = { key, previewVersion: 2, preview, rgb: imageGrid(img), ratio: img.width / img.height, credit };
+    return await navigator.locks.request('liubai-wallpaper', async () => {
+      if (!valid()) return false;
+      const previous = local.image?.key || 'wallpaper';
+      await file('readwrite', store => store.put(blob, key));
+      try {
+        if (!valid()) return false;
+        localStorage.setItem('liubai-device-image', JSON.stringify(meta));
+        local.image = meta;
+      } finally {
+        if (local.image !== meta) await file('readwrite', store => store.delete(key));
+      }
+      state.appearance.wallpaper = 'image';
+      save(true);
+      applyAppearance(true);
+      await file('readwrite', store => store.delete(previous)).catch(() => {});
+      return true;
+    }).catch(() => { throw new Error('无法保存壁纸，请检查本机存储空间后重试'); });
   } finally {
     img.close();
   }
@@ -69,7 +80,7 @@ async function useBing(item) {
   const size = screen.width * devicePixelRatio > 1920 ? 'UHD' : '1920x1080';
   const blob = await (await bingFetch(`${item.base}_${size}.jpg`)).blob();
   if (!valid()) return;
-  await setImage(blob, item.credit, valid);
+  return setImage(blob, item.credit, valid);
 }
 
 /** 「每日自动」：每天最多联网一次；失败后一小时内不重试。 */
@@ -83,11 +94,11 @@ export async function dailyBing(force = false) {
   try {
     const item = (await bingList([0], 1))[0];
     if (revision !== selectionRevision || state.appearance.bing !== 'daily') return;
-    await useBing(item);
+    if (!await useBing(item)) return;
     local.bingDay = today();
     local.bingTry = 0;
     saveLocal('bingDay', 'bingTry');
-  } catch { /* 沿用现有壁纸 */ }
+  } catch (error) { if (force) toast(error.message || '暂时无法更新必应壁纸'); }
 }
 
 // ───────── 面板 ─────────
@@ -109,12 +120,13 @@ export function openAppearance() {
 
   /** 选了具体的壁纸，就不再让「每日自动」覆盖它。 */
   const pin = () => { selectionRevision++; if (a.bing === 'daily') a.bing = 'manual'; };
-  const apply = (final) => { applyAppearance(); save(); if (final) draw(); };
-  const choose = (id) => { if (a.wallpaper === id) return; a.wallpaper = id; pin(); apply(true); };
+  const apply = () => { applyAppearance(); save(); };
+  const choose = (id) => { pin(); a.wallpaper = id; apply(); draw(); };
 
   async function setBing() {
-    if (a.bing === 'off') chrome.permissions.remove(BING_ACCESS);
-    else if (!await chrome.permissions.request(BING_ACCESS)) { a.bing = 'off'; toast('没有获得连接必应的权限'); }
+    ++selectionRevision;
+    if (a.bing === 'off') await chrome.permissions.remove(BING_ACCESS).catch(() => {});
+    else if (!await chrome.permissions.request(BING_ACCESS).catch(() => false)) { a.bing = 'off'; toast('没有获得连接必应的权限'); }
     save();
     draw();
     if (a.bing === 'daily') { await dailyBing(true); draw(); }
@@ -124,16 +136,11 @@ export function openAppearance() {
     gallery = 'loading';
     draw();
     try {
-      if (!await chrome.permissions.request(BING_ACCESS)) throw new Error('未授权');
+      if (!await chrome.permissions.request(BING_ACCESS).catch(() => false)) throw new Error('未授权');
       const items = await bingList();
-      await Promise.allSettled(items.map(async (item) => {
-        const blob = await (await bingFetch(`${item.base}_320x180.jpg`)).blob();
-        if (closed) return;
-        item.thumb = URL.createObjectURL(blob);
-        thumbnails.add(item.thumb);
-      }));
-      gallery = items.filter(item => item.thumb);
-      if (!gallery.length) gallery = 'error';
+      if (closed || a.bing === 'off') return;
+      gallery = items.length ? items : 'error';
+      draw();
     } catch { gallery = 'error'; for (const url of thumbnails) URL.revokeObjectURL(url); thumbnails.clear(); }
     draw();
   }
@@ -143,15 +150,37 @@ export function openAppearance() {
     if (!Array.isArray(gallery)) {
       return h('button', { class: 'btn', text: gallery ? '无法连接必应，点击重试' : '浏览近期壁纸', onclick: loadGallery });
     }
-    return h('div', { class: 'gallery' }, gallery.map((item) => h('button', {
-      class: `swatch${usesImage() && local.image.credit === item.credit ? ' on' : ''}`,
-      title: item.credit,
-      onclick: async (e) => {
-        e.currentTarget.classList.add('busy');
-        try { await useBing(item); pin(); save(); } catch { toast('下载失败，请稍后再试'); }
-        draw();
-      },
-    }, h('img', { src: item.thumb, alt: '' }))));
+    return h('div', { class: 'gallery' }, gallery.map(item => {
+      // Keep each tile while other thumbnails load, preserving hover and focus.
+      if (item.tile) {
+        item.tile.classList.toggle('on', usesImage() && local.image.credit === item.credit);
+        return item.tile;
+      }
+      const tile = item.tile = h('button', { class: 'swatch busy', title: item.credit, disabled: true });
+      const preview = async () => {
+        tile.disabled = true;
+        tile.classList.add('busy');
+        try {
+          const blob = await (await bingFetch(item.base + '_320x180.jpg')).blob();
+          if (closed) return;
+          item.thumb = URL.createObjectURL(blob);
+          thumbnails.add(item.thumb);
+          tile.replaceChildren(h('img', { src: item.thumb, alt: '' }));
+        } catch { tile.textContent = '重试'; }
+        finally { tile.disabled = false; tile.classList.remove('busy'); }
+      };
+      tile.onclick = async () => {
+        if (!item.thumb) return preview();
+        tile.classList.add('busy');
+        try {
+          if (await useBing(item)) { pin(); save(); }
+        } catch (error) { toast(error.message || '壁纸下载失败'); }
+        finally { tile.classList.remove('busy'); draw(); }
+      };
+      preview();
+      return tile;
+    }));
+
   }
 
   function draw() {
@@ -160,7 +189,7 @@ export function openAppearance() {
     const swatch = (label, on, props, onclick) => h('button', { class: `swatch${on ? ' on' : ''}`, title: label, onclick, ...props });
     box.replaceChildren(...[
       control(a, { key: 'theme', label: '主题', options: [['auto', '跟随系统'], ['light', '浅色'], ['dark', '深色']] }, apply),
-      control(a, { key: 'ink', label: '页面字色', options: [['auto', '自动'], ['light', '浅色'], ['dark', '深色'], ['custom', '自定义']] }, apply),
+      control(a, { key: 'ink', label: '页面字色', options: [['auto', '自动'], ['light', '浅色'], ['dark', '深色'], ['custom', '自定义']] }, () => { apply(); draw(); }),
       a.ink === 'custom' && h('label', { class: 'row icon-color' }, h('span', { class: 'row-label', text: '自定义字色' }),
         h('input', { type: 'color', value: a.inkColor, oninput: (e) => { a.inkColor = e.target.value; apply(false); } })),
       control(a, { key: 'inkShadow', label: '文字阴影' }, apply),
@@ -170,7 +199,10 @@ export function openAppearance() {
         swatch('选择图片', false, { text: '＋' }, async () => {
           const picked = await pickFile('image/*');
           if (!picked) return;
-          try { pin(); const revision = selectionRevision; await setImage(picked, '', () => revision === selectionRevision); save(); } catch { toast('无法读取这张图片'); }
+          try {
+            const revision = ++selectionRevision;
+            if (await setImage(picked, '', () => revision === selectionRevision)) { pin(); save(); }
+          } catch (error) { toast(error.message || '无法设置壁纸'); }
           draw();
         })),
       image && control(a, { key: 'dim', label: '暗化', min: 0, max: .7, step: .01, format: percent }, apply),

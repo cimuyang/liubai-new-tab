@@ -1,4 +1,4 @@
-import { recentSearches, deleteSearch, runSearch, openSearchSettings } from './search-settings.js';
+import { recentSearches, deleteSearch, runSearch, searchPreferences } from './search-settings.js';
 // 组件：时间、日期、搜索、天气。
 
 import { state, local, saveLocal } from './store.js';
@@ -108,19 +108,25 @@ export function createSearch() {
   let rows = [];
   let active = 0;
 
+  function dismiss() {
+    rows = [];
+    list.hidden = true;
+    input.setAttribute('aria-expanded', 'false');
+    input.removeAttribute('aria-activedescendant');
+  }
   function suggest() {
     const text = input.value.trim();
     const recent = recentSearches(text);
     list.hidden = !text && !recent.length;
-    if (list.hidden) { rows = []; return; }
+    if (list.hidden) { dismiss(); return; }
     const hits = text ? matchLinks(text) : [];
     const url = looksLikeUrl(text) && normalizeUrl(text);
     rows = [
-      ...hits.map(({ link }) => ({ link, label: link.name || hostOf(link.url), hint: hostOf(link.url), run: () => openUrl(link.url) })),
+      ...hits.map(({ link }) => ({ link, label: link.name || hostOf(link.url), hint: '打开 · ' + hostOf(link.url), run: () => openUrl(link.url) })),
       ...(text ? [url
         ? { label: text, hint: '打开网址', icon: 'globe', run: () => openUrl(url) }
         : { label: text, hint: '搜索', icon: 'search', run: () => runSearch(text) }] : []),
-      ...recent.map(term => ({ term, label: term, hint: '最近搜索 · Shift+Delete 删除', icon: 'search', run: () => runSearch(term) })),
+      ...recent.map(term => ({ term, label: term, hint: '最近搜索', icon: 'search', run: () => runSearch(term) })),
     ];
     active = hits[0]?.prefix ? 0 : hits.length; // 输入与某个链接的开头吻合时默认选中它，否则默认搜索
     draw();
@@ -140,7 +146,7 @@ export function createSearch() {
   }
   addEventListener('resize', fitList);
   function draw() {
-    list.replaceChildren(...rows.map((row, i) => h('button', {
+    list.replaceChildren(...rows.map((row, i) => h('div', {
       class: `sg${i === active ? ' on' : ''}`, id: 'search-option-' + i, role: 'option',
       onpointerdown: (e) => e.preventDefault(), // 不让输入框失焦
       onclick: row.run,
@@ -148,15 +154,17 @@ export function createSearch() {
     },
     row.link ? iconNode(row.link, 'sg-icon') : h('span', { class: 'sg-icon' }, svg(row.icon)),
     h('span', { class: 'sg-name', text: row.label }),
-    h('span', { class: 'sg-hint', text: row.hint }))));
+    h('span', { class: 'sg-hint', text: row.hint }),
+    row.term && h('button', { class: 'history-remove', title: '删除这条搜索记录', 'aria-label': '删除这条搜索记录', tabIndex: -1, text: '×',
+      onclick: e => { e.stopPropagation(); deleteSearch(row.term).then(suggest).catch(() => emit('notice', '删除失败')); } }))));
     highlight(); fitList();
     input.setAttribute('aria-expanded', String(!list.hidden));
   }
 
-  on('search-settings', () => { if (document.activeElement === input) suggest(); else { rows = []; list.hidden = true; input.setAttribute('aria-expanded', 'false'); } });
+  on('search-settings', () => { if (document.activeElement === input) suggest(); else dismiss(); });
   input.addEventListener('input', suggest);
   input.addEventListener('focus', suggest);
-  input.addEventListener('blur', () => { list.hidden = true; input.setAttribute('aria-expanded', 'false'); });
+  input.addEventListener('blur', dismiss);
   on('icon', (key) => {
     if (!list.hidden && rows.some((row) => row.link && !row.link.icon && iconKey(row.link.url) === key)) draw();
   });
@@ -171,6 +179,7 @@ export function createSearch() {
       e.preventDefault();
       active = (active + (e.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length;
       highlight();
+      list.children[active]?.scrollIntoView({ block: 'nearest' });
     } else if (e.key === 'Enter') {
       e.preventDefault();
       rows[active].run();
@@ -179,12 +188,16 @@ export function createSearch() {
 
   return {
     el, title: '搜索', input, constrainWidth: true,
-    render() { el.style.setProperty('--w', state.layout.search.width); el.style.setProperty('--search-height', state.layout.search.height + 'em'); },
-    options: () => [
+    render() { el.style.setProperty('--w', state.layout.search.width); el.style.setProperty('--search-height', state.layout.search.height + 'em'); el.style.setProperty('--text-size', state.layout.search.textSize); },
+    options: (block, update) => [
       { key: 'width', label: '宽度', min: 16, max: 60 },
       { key: 'height', label: '高度', min: 2.2, max: 4.5, step: .1 },
-      h('button', { class: 'btn', text: '搜索引擎与历史', onclick: openSearchSettings }),
-      note('拖左右边调整宽度，上下边调整高度；四角整体缩放。'),
+      { key: 'textSize', label: '字号', min: .7, max: 1.5, step: .05, format: v => Math.round(v * 100) + '%' },
+      h('button', { class: 'link-btn', text: '恢复默认尺寸', onclick: () => {
+        Object.assign(block, { width: 30, height: 2.9, scale: 1, textSize: 1 });
+        update(true); emit('edit', 'search');
+      } }),
+      searchPreferences(),
     ],
   };
 }

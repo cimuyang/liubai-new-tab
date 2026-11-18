@@ -564,3 +564,15 @@ html.editing .toast { top: 70px; }
 .sel i:nth-child(7) { top: -7px; left: calc(50% - 6px); cursor: ns-resize; }
 .sel i:nth-child(8) { bottom: -7px; left: calc(50% - 6px); cursor: ns-resize; }
 .sg-hint { max-width: 48%; overflow: hidden; text-overflow: ellipsis; }
+
+.search-box { border-radius: 999px; }
+.search-box input { font-size: calc(.98em * var(--text-size, 1)); }
+.search-prefs { border-top: 1px solid var(--panel-hair); padding-top: 12px; }
+.insp { max-height: calc(100vh - 100px); overflow-y: auto; }
+.menu { max-height: calc(100vh - 16px); overflow-y: auto; }
+.history-remove { opacity: 0; width: 1.6em; border-radius: 50%; }
+.sg:hover .history-remove, .sg.on .history-remove { opacity: .8; }
+.history-remove:hover { background: var(--glass-hover); }
+.sel[data-kind="search"] i:nth-child(n+5):nth-child(-n+6) { width: 6px; height: 16px; top: calc(50% - 8px); }
+.sel[data-kind="search"] i:nth-child(n+7) { width: 16px; height: 6px; left: calc(50% - 8px); }
+.sel[data-size]::after { content: attr(data-size); position: absolute; left: 50%; top: 100%; transform: translateX(-50%); margin-top: 8px; padding: 3px 8px; border-radius: 6px; background: var(--panel); color: var(--panel-fg); font-size: 11px; white-space: nowrap; }

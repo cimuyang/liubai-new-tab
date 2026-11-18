@@ -12,7 +12,7 @@ export const DATA_VERSION = 4;
 export const defaultLayout = () => ({
   clock: { visible: true, x: .5, y: .17, scale: 1, hour24: true, seconds: false, weight: 200 },
   date: { visible: true, x: .5, y: .275, scale: 1, format: 'long', lunar: false },
-  search: { visible: true, x: .5, y: .375, scale: 1, width: 30, height: 2.9 },
+  search: { visible: true, x: .5, y: .375, scale: 1, width: 30, height: 2.9, textSize: 1 },
   weather: { visible: false, x: .91, y: .08, scale: 1, city: null, unit: 'C', range: true },
   links: {
     visible: true, x: .5, y: .465, scale: 1, columns: 8, align: 'center', gap: 1.3, radius: 26,
@@ -65,6 +65,7 @@ function normalizeLayout(raw) {
   result.clock.weight = choice(raw?.clock?.weight, [200, 300, 400, 500, 600, 700], result.clock.weight);
   result.clock.weight = result.clock.weight <= 300 ? 200 : result.clock.weight <= 500 ? 400 : 600;
   result.date.format = choice(raw?.date?.format, ['long', 'full', 'short'], 'long');
+  result.search.textSize = number(raw?.search?.textSize, .7, 1.5, 1);
   result.search.height = number(raw?.search?.height, 2.2, 4.5, 2.9);
   result.search.width = number(raw?.search?.width, 16, 60, 30);
   result.weather.unit = choice(raw?.weather?.unit, ['C', 'F'], 'C');

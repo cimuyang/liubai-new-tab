@@ -1,5 +1,5 @@
 import { h, openUrl, searchWeb, emit } from './dom.js';
-import { sheet, toast } from './ui.js';
+import { field, toast } from './ui.js';
 
 const KEY = 'liubai-search';
 const defaults = { enabled: false, engine: 'default', custom: '', history: [] };
@@ -37,21 +37,44 @@ export async function runSearch(query) {
 function validTemplate(value) {
   try { const u = new URL(value.replaceAll('{query}', 'test')); return value.includes('{query}') && u.protocol === 'https:' && !u.username && !u.password; } catch { return false; }
 }
-export async function openSearchSettings() {
-  await loadSearchSettings();
-  const engine = h('select', { class: 'input', 'aria-label': '搜索引擎' }, Object.entries({ default: '浏览器默认', google: '谷歌', bing: '必应', baidu: '百度', custom: '自定义' }).map(([value, text]) => h('option', { value, text })));
+export function searchPreferences() {
+  const labels = { default: '浏览器默认', google: '谷歌', bing: '必应', baidu: '百度', custom: '自定义' };
+  const engine = h('select', { class: 'input', 'aria-label': '搜索引擎' },
+    Object.entries(labels).map(([value, text]) => h('option', { value, text })));
   engine.value = settings.engine;
-  const custom = h('input', { class: 'input', value: settings.custom, placeholder: 'https://example.com/search?q={query}', 'aria-label': '自定义搜索地址' });
-  custom.hidden = engine.value !== 'custom';
-  engine.addEventListener('change', () => custom.hidden = engine.value !== 'custom');
-  const enabled = h('input', { type: 'checkbox', checked: settings.enabled });
-  sheet({ title: '搜索设置', body: [engine, custom,
-    h('p', { class: 'note', text: '自定义地址使用 HTTPS，以 {query} 代表搜索词。' }),
-    h('label', { class: 'row' }, enabled, '记住最近搜索'),
-    h('p', { class: 'note', text: '默认关闭。开启后仅在本机保留最近 30 条；无痕窗口不记录。关闭并保存会删除已有记录。搜索历史不包含在备份中。' }),
-    h('button', { class: 'btn', text: '清空搜索历史', onclick: async () => { try { await update(s => s.history = []); toast('搜索历史已清空'); } catch { toast('清空失败，请重试'); } } })],
-    actions: [{ label: '取消' }, { label: '保存', primary: true, onClick: async close => {
-      if (engine.value === 'custom' && !validTemplate(custom.value.trim())) { toast('请输入包含 {query} 的有效 HTTPS 地址'); return; }
-      try { await update(s => { s.engine = engine.value; s.custom = custom.value.trim(); s.enabled = enabled.checked; if (!s.enabled) s.history = []; }); close(); } catch { toast('无法保存搜索设置'); }
-    } }] });
+  const address = h('input', { class: 'input', type: 'url', value: settings.custom,
+    placeholder: 'https://example.com/search?q={query}', 'aria-label': '自定义搜索地址' });
+  const commitEngine = async () => {
+    if (engine.value === 'custom' && !validTemplate(address.value.trim())) {
+      address.setCustomValidity('请输入包含 {query} 的 HTTPS 搜索地址');
+      address.reportValidity();
+      return;
+    }
+    const value = engine.value, custom = address.value.trim();
+    try { await update(s => { s.engine = value; if (value === 'custom') s.custom = custom; }); }
+    catch { engine.value = settings.engine; toast('搜索引擎保存失败'); }
+  };
+  const apply = h('button', { class: 'btn', text: '应用地址', onclick: commitEngine });
+  const customFields = h('div', { class: 'stack', hidden: engine.value !== 'custom' },
+    field('自定义地址', address), h('p', { class: 'note', text: '用 {query} 表示搜索词。' }), apply);
+  address.oninput = () => address.setCustomValidity('');
+  address.onkeydown = e => { if (e.key === 'Enter' && !e.isComposing) commitEngine(); };
+  engine.onchange = () => {
+    customFields.hidden = engine.value !== 'custom';
+    if (customFields.hidden) commitEngine(); else address.focus();
+  };
+  const enabled = h('input', { type: 'checkbox', class: 'switch', checked: settings.enabled });
+  const clear = h('button', { class: 'link-btn', text: '清空记录', hidden: !enabled.checked,
+    onclick: async () => { try { await update(s => s.history = []); toast('搜索历史已清空'); } catch { toast('清空失败'); } } });
+  enabled.onchange = async () => {
+    const checked = enabled.checked;
+    enabled.disabled = true;
+    try { await update(s => { s.enabled = checked; if (!checked) s.history = []; }); }
+    catch { enabled.checked = settings.enabled; toast('搜索历史设置保存失败'); }
+    enabled.disabled = false;
+    clear.hidden = !enabled.checked;
+  };
+  return h('div', { class: 'stack search-prefs' }, field('搜索引擎', engine), customFields,
+    h('label', { class: 'row' }, h('span', { class: 'row-label grow', text: '记住最近搜索' }), enabled),
+    h('p', { class: 'note', text: '仅在本机保留 30 条。无痕窗口不记录，关闭即清空。' }), clear);
 }

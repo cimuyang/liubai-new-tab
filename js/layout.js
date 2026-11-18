@@ -245,7 +245,7 @@ function inspect() {
   ui.insp.replaceChildren(
     h('div', { class: 'insp-head' }, h('b', { text: def.title }), h('button', { class: 'link-btn', text: '隐藏', onclick: hideSelected })),
     ...def.options(block, update).map((item) => (item instanceof Node ? item : control(block, item, update))),
-    control(block, scale, move),
+    ...(selected === 'search' ? [] : [control(block, scale, move)]),
   );
 }
 
@@ -395,16 +395,30 @@ function startScale(e) {
   const d0 = Math.hypot(e.clientX - ax, e.clientY - ay) || 1;
   const s0 = block.scale;
   const handle = [...ui.sel.children].indexOf(e.target);
-  const width = block.width, height = block.height;
   const unit = parseFloat(getComputedStyle(defs[id].el).fontSize);
   const editor = ui;
 
   track((ev) => {
     if (ui !== editor) return;
-    if (id === 'search' && handle >= 4) {
-      if (handle < 6) block.width = Math.round(clamp(width + (ev.clientX - e.clientX) * (handle === 4 ? -2 : 2) / unit, 16, 60) * 10) / 10;
-      else block.height = Math.round(clamp(height + (ev.clientY - e.clientY) * (handle === 6 ? -2 : 2) / unit, 2.2, 4.5) * 10) / 10;
-      defs[id].render(); place(id); frame(); return;
+    if (id === 'search') {
+      const dx = ev.clientX - e.clientX, dy = ev.clientY - e.clientY;
+      const left = [0, 2, 4].includes(handle), top = [0, 1, 6].includes(handle);
+      if (handle < 6) {
+        const available = left ? r.right - 8 : innerWidth - 8 - r.left;
+        const maximum = Math.min(60 * unit, innerWidth - 32, available);
+        const w = clamp(r.width + (left ? -dx : dx), Math.min(16 * unit, maximum), maximum);
+        block.width = Math.max(16, w / unit);
+        block.x = (left ? r.right - w / 2 : r.left + w / 2) / innerWidth;
+      }
+      if (handle < 4 || handle >= 6) {
+        const maximum = Math.min(4.5 * unit, top ? r.bottom : innerHeight - r.top);
+        const h = clamp(r.height + (top ? -dy : dy), Math.min(2.2 * unit, maximum), maximum);
+        block.height = h / unit;
+        block.y = (top ? r.bottom - h / 2 : r.top + h / 2) / innerHeight;
+      }
+      defs[id].render(); place(id); frame();
+      ui.sel.dataset.size = Math.round(rectOf(id).width) + ' × ' + Math.round(rectOf(id).height);
+      return;
     }
     let s = clamp(s0 * Math.hypot(ev.clientX - ax, ev.clientY - ay) / d0, .4, 3);
     if (!ev.altKey && Math.abs(s - 1) < .04) s = 1; // 吸附到默认大小
@@ -413,6 +427,7 @@ function startScale(e) {
     frame();
   }, () => {
     if (ui !== editor) return;
+    delete ui.sel.dataset.size;
     inspect();
     commit();
   });
